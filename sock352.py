@@ -456,8 +456,9 @@ class socket:
 					#rec_packet = packHeader(raw_packet)
 				rec_packet = packHeader(raw_packet)
 				self.window = rec_packet.window
-				print "s.w: ", self.window
 				#print "Packet received..."
+				print "rec_packet.ack_no: ", rec_packet.ack_no
+				print "data.header.sequence_no + 1: ", (data.header.sequence_no+1)
 				if (rec_packet.flags != ACK_VAL or rec_packet.ack_no != (data.header.sequence_no + 1)):
 					print "Wrong ACK, Going Back N"
 					#go back n protocol implemented here
@@ -473,6 +474,8 @@ class socket:
 		self.next_seq= rec_packet.ack_no 
 		self.prev_ack = rec_packet.ack_no - 1
 		self.next_ack = rec_packet.ack_no + 1
+		print "self.next_ack: ", self.next_ack
+		print "+ payload: ", (self.next_ack + len(payload))
 		
 		'''if(self.encrypt):
 			 headerLen = self.length_encrypted_header'''
