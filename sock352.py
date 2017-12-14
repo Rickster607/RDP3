@@ -389,8 +389,23 @@ class socket:
 		packed_FIN = FIN.packPacket()
 		if(self.encrypt):
 			 packed_FIN = self.box.encrypt(packed_FIN, self.nonce)
-								 
-		global_socket.sendto(packed_FIN, self.address)
+		while True:
+			global_socket.sendto(packed_FIN, self.address)
+			try:
+				global_socket.settimeout(.2)
+			if(self.encrypt):
+				(raw_packet, sender) = global_socket.recvfrom(self.length_encrypted_header)
+				rec_packet = self.box.decrypt(raw_packet)
+			else:
+				(raw_packet, sender) = global_socket.recvfrom(HEADER_SIZE)
+			rec_packet = packHeader(raw_packet)
+			if (rec_packet.flags != FIN_VAL or rec_packet.ack_no != (data.header.sequence_no + data.header.payload_len)):
+				continue
+			break
+		except syssock.timeout:
+			print "Socket Timed Out Receiving FIN"
+		finally:
+			global_socket.settimeout(None)
 		print "Closing socket"
 		self.connected = False
 		self.address=None
@@ -458,9 +473,10 @@ class socket:
 				self.window = rec_packet.window
 				#print "Packet received..."
 				print "rec_packet.ack_no: ", rec_packet.ack_no
-				print "data.header.sequence_no + 1: ", (data.header.sequence_no+1)
-				if (rec_packet.flags != ACK_VAL or rec_packet.ack_no != (data.header.sequence_no + 1)):
+				print "data.header.sequence_no + payload: ", (data.header.sequence_no+data.header.payload_len)
+				if (rec_packet.flags != ACK_VAL or rec_packet.ack_no != (data.header.sequence_no + data.header.payload_len)):
 					print "Wrong ACK, Going Back N"
+					continue
 					#go back n protocol implemented here
 					#LOOKATME
 				break
@@ -508,6 +524,7 @@ class socket:
 				if (rec_packet_header.flags > 0):
 					print "Not data packet"
 					if (rec_packet_header.flags == FIN_VAL):
+						if self.window == 32000:
 						global_socket.close()
 						break;
 
