@@ -312,7 +312,6 @@ class socket:
 		# your code goes here
 		global window
 		window = deque()
-		print "init window: ", window
 		global printables
 		printables = set(string.printable)
 
@@ -380,7 +379,7 @@ class socket:
 		self.address=sender
 		return(clientsocket, sender)
 	
-	def close(self):
+	def closeWindow(self):
 		# your code goes here
 		# send a FIN packet (flags with FIN bit set)
 		# remove the connection from the list of connections
@@ -415,8 +414,29 @@ class socket:
 		self.next_ack = 0
 		self.init_seq = 0
 		return 
+	
+	def close(self):
+		# your code goes here
+		# send a FIN packet (flags with FIN bit set)
+		# remove the connection from the list of connections
+		#initializes FIN packet
+		FIN = new_packet()
+		FIN.header.flags = FIN_VAL
+		packed_FIN = FIN.packPacket()
+		if(self.encrypt):
+			 packed_FIN = self.box.encrypt(packed_FIN, self.nonce)
+								 
+		global_socket.sendto(packed_FIN, self.address)
+		print "Closing socket"
+		self.connected = False
+		self.address=None
+		self.prev_ack = 0
+		self.next_seq = 0
+		self.next_ack = 0
+		self.init_seq = 0
+		return 
 
-	def send(self,buffer):
+	def sendWindow(self,buffer):
 		# your code goes here
 		#print "In send function"
 		bytessent = 0  # fill in your code here
@@ -508,8 +528,89 @@ class socket:
 		
 		return bytesSent
 		#return bytesSent - HEADER_SIZE 
+	
+	def send(self,buffer):
+		# your code goes here
+		#print "In send function"
+		bytessent = 0  # fill in your code here
+		#assigns the data in buffer up until the 5000th byte to payload
+		payload = buffer[:4096]
+		#creates new packet of type payload
+		#print "Creating payload packet"
+		data = new_packet()
+		#assigns payload length
+		data.header.payload_len = len(payload)
+		#print "payload length is", data.header.payload_len
+		#sets sequence and ack numbers
+		#print "Setting ACK and SEQ numbers of payload packet"
+		data.header.sequence_no = self.next_seq
+		#print "sequence number", self.next_seq
+		
+		data.header.ack_no = data.header.sequence_no+1
+		#print "ack number", data.header.ack_no
+		if(self.encrypt):
+			self.nonce=nacl.utils.random(Box.NONCE_SIZE)
+			payload=self.box.encrypt(payload, self.nonce)
+		#assigns payload to the payload field of data packet
+		data.payload = payload
+		
+		#packages the data packet
+		#print "Packaging payload packet"
+		packed_data = data.packPacket()
+		#count += count
+		'''if(self.encrypt):
+			self.nonce = nacl.utils.random(Box.NONCE_SIZE)
+			packed_data = self.box.encrypt(packed_data, self.nonce)'''
+								 
+		#print "Sending payload packet"
+		while True:
+		
+			bytesSent = global_socket.sendto(packed_data, self.address)
 
-	def recv(self,nbytes):
+			try:
+				global_socket.settimeout(.2)
+				#(raw_packet, sender) = global_socket.recvfrom(HEADER_SIZE)
+				#rec_packet = packHeader(raw_packet)
+				if(self.encrypt):
+					(raw_packet, sender) = global_socket.recvfrom(self.length_encrypted_header)
+					rec_packet = self.box.decrypt(raw_packet)
+				else:
+					#(rec_packet, sender) = global_socket.recvfrom(HEADER_SIZE)
+					(raw_packet, sender) = global_socket.recvfrom(HEADER_SIZE)
+					#rec_packet = packHeader(raw_packet)
+				rec_packet = packHeader(raw_packet)
+				#print "Packet received..."
+				if (rec_packet.flags != ACK_VAL or rec_packet.ack_no != (data.header.sequence_no + 1)):
+					print "Wrong ACK, Going Back N"
+					#go back n protocol implemented here
+					#LOOKATME
+				break
+			except syssock.timeout:
+				print "Socket Timed Out.."
+				#continue
+
+			finally:
+				global_socket.settimeout(None)
+		#sets ack and sequence numbers of data packet
+		self.next_seq= rec_packet.ack_no 
+		self.prev_ack = rec_packet.ack_no - 1
+		self.next_ack = rec_packet.ack_no + 1
+		
+		'''if(self.encrypt):
+			 headerLen = self.length_encrypted_header'''
+		#else:
+		headerLen = HEADER_SIZE
+		
+		bytesSent = len(buffer)
+
+		if(len(buffer) > 4096):
+			bytesSent = 4096
+
+		
+		return bytesSent
+		#return bytesSent - HEADER_SIZE 
+
+	def recvWindow(self,nbytes):
 		# your code goes here
 		#standard code of timeout and receive from functions
 		while True:
@@ -545,20 +646,17 @@ class socket:
 						break
 
 				else:
-					#while (recv_helper...)
 					print "Its a data packet!", payload
 					amt_used = 32000 - self.window
 					if nbytes == 4 or nbytes == 16:
 						print "in here", amt_used
 						if amt_used == 0:
 							break
-#					if ((self.window - len(payload)) < 32000):
 					for x in payload:
 						if x in printables:
 							print "x: ", x
 							window.append(x)
 							self.window = self.window - 1
-#							rec_packet_header.window = rec_packet_header.window - 1
 					amt_used = 32000 - self.window
 					print "Window: ", self.window, amt_used
 					if (nbytes > amt_used):
@@ -626,4 +724,53 @@ class socket:
 
 		return payload
 
-#	def recv_helper(self, nbytes, payload):
+	def recv(self,nbytes):
+		# your code goes here
+		#standard code of timeout and receive from functions
+		while True:
+			try:
+				global_socket.settimeout(.2)
+				rPack, sender = global_socket.recvfrom(8192)
+				print "received packet"
+				rec_packet_header = packHeader(rPack[:40])
+				payload=rPack[40:]
+				
+				if (self.encrypt):
+					payload=self.box.decrypt(payload)
+								 
+				#rec_packet_header = packHeader(rec_packet[:40])
+				#print "getting packet header"
+
+				if (rec_packet_header.flags > 0):
+					print "Not data packet"
+					if (rec_packet_header.flags == FIN_VAL):
+						global_socket.close()
+						break;
+
+				else:
+					print "Its a data packet!"
+					break
+
+			except syssock.timeout:
+				print "Socket timed out recieving"
+
+			finally:
+				#print "Its a data packet!"
+				global_socket.settimeout(None)
+		#print "Its a data packet!"
+		self.next_seq = rec_packet_header.ack_no
+		self.prev_ack= rec_packet_header.ack_no - 1
+		self.next_ack = rec_packet_header.ack_no + 1
+	
+		#payload is now everything after the 40th byte of the received packet
+		ack = new_packet()
+		print "creating ACK packet in recv"
+		ack.create_ack(rec_packet_header)
+		packed_ack = ack.packPacket()
+		print "sending ACK packet in recv"
+		
+		'''if(self.encrypt):
+			packed_ack = self.box.encrypt(packed_ack, self.nonce)'''
+		global_socket.sendto(packed_ack, sender)
+
+		return payload
