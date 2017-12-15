@@ -312,6 +312,7 @@ class socket:
 		# your code goes here
 		global window
 		window = deque()
+		print "init window: ", window
 		global printables
 		printables = set(string.printable)
 
@@ -393,19 +394,19 @@ class socket:
 			global_socket.sendto(packed_FIN, self.address)
 			try:
 				global_socket.settimeout(.2)
-			if(self.encrypt):
-				(raw_packet, sender) = global_socket.recvfrom(self.length_encrypted_header)
-				rec_packet = self.box.decrypt(raw_packet)
-			else:
-				(raw_packet, sender) = global_socket.recvfrom(HEADER_SIZE)
-			rec_packet = packHeader(raw_packet)
-			if (rec_packet.flags != FIN_VAL or rec_packet.ack_no != (data.header.sequence_no + data.header.payload_len)):
-				continue
-			break
-		except syssock.timeout:
-			print "Socket Timed Out Receiving FIN"
-		finally:
-			global_socket.settimeout(None)
+				if(self.encrypt):
+					(raw_packet, sender) = global_socket.recvfrom(self.length_encrypted_header)
+					rec_packet = self.box.decrypt(raw_packet)
+				else:
+					(raw_packet, sender) = global_socket.recvfrom(HEADER_SIZE)
+				rec_packet = packHeader(raw_packet)
+				if (rec_packet.flags != FIN_VAL or rec_packet.ack_no != (data.header.sequence_no + data.header.payload_len)):
+					continue
+				break
+			except syssock.timeout:
+				print "Socket Timed Out Receiving FIN"
+			finally:
+				global_socket.settimeout(None)
 		print "Closing socket"
 		self.connected = False
 		self.address=None
@@ -420,7 +421,8 @@ class socket:
 		#print "In send function"
 		bytessent = 0  # fill in your code here
 		#assigns the data in buffer up until the 5000th byte to payload
-		payload = buffer[:4096]
+#		payload = buffer[:4096]
+		payload = buffer
 		#creates new packet of type payload
 		#print "Creating payload packet"
 		data = new_packet()
@@ -490,8 +492,8 @@ class socket:
 		self.next_seq= rec_packet.ack_no 
 		self.prev_ack = rec_packet.ack_no - 1
 		self.next_ack = rec_packet.ack_no + 1
-		print "self.next_ack: ", self.next_ack
-		print "+ payload: ", (self.next_ack + len(payload))
+#		print "self.next_ack: ", self.next_ack
+#		print "+ payload: ", (self.next_ack + len(payload))
 		
 		'''if(self.encrypt):
 			 headerLen = self.length_encrypted_header'''
@@ -500,8 +502,8 @@ class socket:
 		
 		bytesSent = len(buffer)
 
-		if(len(buffer) > 4096):
-			bytesSent = 4096
+#		if(len(buffer) > 4096):
+#			bytesSent = 4096
 
 		
 		return bytesSent
@@ -524,26 +526,43 @@ class socket:
 				if (rec_packet_header.flags > 0):
 					print "Not data packet"
 					if (rec_packet_header.flags == FIN_VAL):
-						if self.window == 32000:
+						if self.window < 32000:
+							payload = ""
+							for x in range(0, nbytes):
+								print "Self.window: ", self.window, nbytes
+								payload = payload + window.popleft()
+								self.window = self.window + 1
+							print "FIN payload: ", payload
+							return payload
+						print "Creating FIN in recv"
+						FIN = new_packet()
+						FIN.header.flags = FIN_VAL
+						packed_FIN = FIN.packPacket()
+						if(self.encrypt):
+							packed_FIN = self.box.encrypt(packed_FIN, self.nonce)
+						global_socket.sendto(packed_FIN, self.address)
 						global_socket.close()
-						break;
+						break
 
 				else:
 					#while (recv_helper...)
-					print "Its a data packet!"
+					print "Its a data packet!", payload
+					amt_used = 32000 - self.window
+					if nbytes == 4 or nbytes == 16:
+						print "in here", amt_used
+						if amt_used == 0:
+							break
 #					if ((self.window - len(payload)) < 32000):
 					for x in payload:
 						if x in printables:
+							print "x: ", x
 							window.append(x)
 							self.window = self.window - 1
 #							rec_packet_header.window = rec_packet_header.window - 1
 					amt_used = 32000 - self.window
 					print "Window: ", self.window, amt_used
-					if nbytes == 4:
-						if amt_used == 0:
-							break
 					if (nbytes > amt_used):
-						print "nbytes > amt_used"
+						print "nbytes > amt_used", nbytes, amt_used
 						self.next_seq = rec_packet_header.ack_no
 						self.prev_ack= rec_packet_header.ack_no - 1
 						self.next_ack = rec_packet_header.ack_no + 1
@@ -574,7 +593,7 @@ class socket:
 					break
 
 			except syssock.timeout:
-				print "Socket timed out recieving"
+				print "Socket timed out receiving"
 				amt_used = 32000 - self.window
 				if (nbytes <= amt_used):
 					payload = ""
