@@ -36,7 +36,7 @@ def main():
     if (args['port']): 
         port = args['port']
     else:
-        port = 1300
+        port = 1111 
     
     if (filename):
         try: 
@@ -67,7 +67,6 @@ def main():
     # binding the host to empty allows reception on
     # all network interfaces
     s.bind(('',port))
-    print "stuck here"
     s.listen(5)
 
     # when accept returns, the client is connected 
